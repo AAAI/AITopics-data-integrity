@@ -13,8 +13,8 @@ use vars qw($VERSION @ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
 $VERSION     = 1.00;
 @ISA         = qw(Exporter);
 @EXPORT      = ();
-@EXPORT_OK   = qw(upload_file update_node process_nodes);
-%EXPORT_TAGS = (DEFAULT => [qw(upload_file update_node process_nodes)]);
+@EXPORT_OK   = qw(upload_file update_node process_nodes get_node_by_alias);
+%EXPORT_TAGS = (DEFAULT => [qw(upload_file update_node process_nodes get_node_by_alias)]);
 
 
 my $json_decoder = JSON->new->utf8;
@@ -63,6 +63,19 @@ sub update_node {
     }
 }
 
+sub get_node_by_alias {
+    my $ua = shift;
+    my $alias = shift;
+    $ua->get("http://aitopics.org/rest/node-by-alias?alias=$alias");
+    my @json_data = @{$json_decoder->decode($ua->{content})};
+    my %node = %{$json_data[0]};
+    if($node{'node_title'} ne '') {
+        return $node{'nid'};
+    } else {
+        return '';
+    }
+}
+
 sub process_nodes {
     my $ua = shift;
     my $service = shift;
@@ -94,6 +107,8 @@ sub process_nodes {
     }
 
     foreach my $i (0..$#nodes) {
+        if($i % 100 == 0) { print "\n".($i+1)."/".($#nodes+1)."\n"; }
+
         my %node = %{$nodes[$i]};
 
         if($process_func->($ua, %node)) {

@@ -6,8 +6,9 @@ use WWW::Mechanize;
 use HTTP::Cookies;
 use Data::Dumper;
 use Getopt::Std;
+use Date::Simple ('today');
 
-use AITopics qw(upload_file update_node process_nodes);
+use AITopics qw(upload_file update_node process_nodes get_node_by_alias);
 
 my %item_types = (
     'link' => '3826',
@@ -73,6 +74,20 @@ sub process_link {
     return $result;
 }
 
+sub process_item {
+    my $ua = shift;
+    my (%node) = @_;
+    my $result = 0;
+
+    if(ref($node{'Publication date'}) ne 'ARRAY') {
+        my $year = substr($node{'Publication date'}, 0, 4);
+        if($node{'Publication Year'} ne $year) {
+            my $json_content = '{"field_publication_year_int": {"und": [{"value": "'.$year.'"}]}}';
+            $result |= update_node($ua, $node{'nid'}, $json_content);
+        }
+    }
+}
+
 sub process_video {
     my $ua = shift;
     my (%node) = @_;
@@ -110,6 +125,35 @@ sub process_video {
     return $result;
 }
 
+sub promote_top_nodes {
+    my $ua = shift;
+    my $today = today();
+    my $week_back = $today - 7;
+    my $analytics_output = `python top_nodes.py $week_back $today`;
+    my $i = 0;
+    foreach my $line (split(/\n/, $analytics_output)) {
+        if($i >= 6) { last; }
+        else {
+            my ($url) = ($line =~ m!\(\d+/\d+\) /(.*$)!);
+            my $nid = get_node_by_alias($ua, $url);
+            if($nid ne '') {
+                update_node($ua, $nid, '{"promote": "1", "field_sort_weight": {"und": [{"value": "'.$i.'"}]}}');
+                $i++;
+            }
+        }
+    }
+
+}
+
+sub process_front_page {
+    my $ua = shift;
+    my (%node) = @_;
+    my $result = 0;
+
+    # unpublish every front page node
+    $result = update_node($ua, $node{'nid'}, '{"promote": null}');
+}
+
 sub process_topic {
     my $ua = shift;
     my (%node) = @_;
@@ -120,18 +164,19 @@ sub process_topic {
     if(ref($node{'Representative image'})) {
         push(@issues, "Missing representative image");
     }
-    if(ref($node{'Body'})) {
+    if(ref($node{'Body'}) || length($node{'Body'}) < 1000) {
         push(@issues, "Short or missing summary");
     }
-    if(!ref($node{'Body'}) && ($node{'Body'} =~ m/#/ ||
+    if(!ref($node{'Body'}) && ($node{'Body'} =~ m/href="#[^"]+"/ ||
                                $node{'Body'} =~ m/aitopics\.net/)) {
         push(@issues, "Internal links to old site in summary");
     }
     if(!ref($node{'Body'})) {
         while($node{'Body'} =~ m/href="(.*?)"/g) {
-            my $resp = $ua->get($1);
+            my $url = $1;
+            my $resp = $ua->get($url);
             if(!$resp->is_success) {
-                $resp = $ua->get("http://aitopics.org$1");
+                $resp = $ua->get("http://aitopics.org$url");
                 if(!$resp->is_success) {
                     push(@issues, "Broken links in summary");
                     last;
@@ -169,6 +214,8 @@ sub HELP_MESSAGE {
     -t for topic updates
     -v for video updates
     -l for link updates
+    -i for all item updates (e.g., year fixes)
+    -f to update the front page
 ";
 }
 
@@ -183,16 +230,27 @@ sub run {
         cookie_jar => HTTP::Cookies->new(file => "cookies.txt"));
 
     my %opts = ();
-    getopts('tvl', \%opts);
+    getopts('tvlif', \%opts);
 
-    if(exists($opts{'t'})) {
-        process_nodes($ua, "topics", \&process_topic);
-    }
-    if(exists($opts{'v'})) {
-        process_nodes($ua, "items?item_type=$item_types{'video'}", \&process_video);
-    }
-    if(exists($opts{'l'})) {
-        process_nodes($ua, "items?item_type=$item_types{'link'}", \&process_link);
+    if(length(%opts) > 1) {
+        if(exists($opts{'t'})) {
+            process_nodes($ua, "topics", \&process_topic);
+        }
+        if(exists($opts{'v'})) {
+            process_nodes($ua, "items?item_type=$item_types{'video'}", \&process_video);
+        }
+        if(exists($opts{'l'})) {
+            process_nodes($ua, "items?item_type=$item_types{'link'}", \&process_link);
+        }
+        if(exists($opts{'i'})) {
+            process_nodes($ua, "items", \&process_item);
+        }
+        if(exists($opts{'f'})) {
+            process_nodes($ua, "front-page", \&process_front_page);
+            promote_top_nodes($ua);
+        }
+    } else {
+        HELP_MESSAGE(*STDOUT);
     }
 }
 
