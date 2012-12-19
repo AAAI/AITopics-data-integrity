@@ -68,9 +68,13 @@ sub get_node_by_alias {
     my $alias = shift;
     $ua->get("http://aitopics.org/rest/node-by-alias?alias=$alias");
     my @json_data = @{$json_decoder->decode($ua->{content})};
-    my %node = %{$json_data[0]};
-    if($node{'node_title'} ne '') {
-        return $node{'nid'};
+    if($#json_data >= 0) {
+        my %node = %{$json_data[0]};
+        if($node{'node_title'} ne '') {
+            return $node{'nid'};
+        } else {
+            return '';
+        }
     } else {
         return '';
     }
