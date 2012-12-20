@@ -186,7 +186,7 @@ sub promote_top_nodes {
                     }
                     $news_count++;
                 } else {
-                    if($i < 6) {
+                    if($i < 4) {
                         print "Promoting $alias\n";
                         update_node($ua, $nid, '{"promote": "1", "field_sort_weight": {"und": [{"value": "'.$i.'"}]}}');
                     }
