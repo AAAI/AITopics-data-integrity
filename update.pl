@@ -68,7 +68,7 @@ sub process_link {
     #$result |= correct_local_link($ua, %node);
 
     #$result |= check_title_in_primary_link($ua, %node);
-
+    
     #print Dumper(\%node);
 
     return $result;
@@ -84,6 +84,46 @@ sub process_item {
         if($node{'Publication Year'} ne $year) {
             my $json_content = '{"field_publication_year_int": {"und": [{"value": "'.$year.'"}]}}';
             $result |= update_node($ua, $node{'nid'}, $json_content);
+        }
+    }
+}
+
+sub process_recommendation {
+    my $ua = shift;
+    my (%node) = @_;
+
+    # grab node alias
+    my $resp = $ua->get('http://aitopics.org/node/'.$node{'nid'});
+    my ($alias) = ($resp->header('Content-Location') =~ m!^http://aitopics.org(.*)$!);
+    print "\nGetting next clicks for $alias\n";
+    my $today = today();
+    my $month_back = $today - 30;
+    my $analytics_output = `python next_page.py $month_back $today $alias`;
+    print "$analytics_output\n";
+    if($analytics_output =~ m!No results found!) { return 0; }
+    else {
+        my $i = 0;
+        my $json_content = '{"field_next_clicks": {"und": [';
+        while($i < 3 && $analytics_output =~ m!^(\S+) (\d+)$!g) {
+            my $next_alias = $1;
+            my $click_count = $2;
+            if($next_alias eq $alias) { next; }
+
+            $ua->get('http://aitopics.org'.$next_alias);
+            my $title = $ua->title();
+            $title =~ s/(["'])/\\$1/g;
+            $title =~ s/ \| AITopics$//;
+            if($i > 0) {
+                $json_content .= ", ";
+            }
+            $json_content .= '{"url": "http://aitopics.org'.$next_alias.'", "title": "'.$title.'"}';
+            $i++;
+        }
+        $json_content .= ']}}';
+        if($i > 0) {
+            return update_node($ua, $node{'nid'}, $json_content);
+        } else {
+            return 0;
         }
     }
 }
@@ -130,15 +170,28 @@ sub promote_top_nodes {
     my $today = today();
     my $week_back = $today - 7;
     my $analytics_output = `python top_nodes.py $week_back $today`;
+    print "$analytics_output\n\n";
+    my $news_count = 0;
     my $i = 0;
     foreach my $line (split(/\n/, $analytics_output)) {
-        if($i >= 6) { last; }
+        if($i >= 6 && $news_count >= 2) { last; }
         else {
-            my ($url) = ($line =~ m!\(\d+/\d+\) /(.*$)!);
-            my $nid = get_node_by_alias($ua, $url);
+            my ($alias) = ($line =~ m!\(\d+/\d+\) /(.*$)!);
+            my $nid = get_node_by_alias($ua, $alias);
             if($nid ne '') {
-                update_node($ua, $nid, '{"promote": "1", "field_sort_weight": {"und": [{"value": "'.$i.'"}]}}');
-                $i++;
+                if($alias =~ m!^news/\w+!) {
+                    if($news_count < 2) {
+                        print "Promoting $alias\n";
+                        update_node($ua, $nid, '{"promote": "1", "field_sort_weight": {"und": [{"value": "'.$news_count.'"}]}}');
+                    }
+                    $news_count++;
+                } else {
+                    if($i < 6) {
+                        print "Promoting $alias\n";
+                        update_node($ua, $nid, '{"promote": "1", "field_sort_weight": {"und": [{"value": "'.$i.'"}]}}');
+                    }
+                    $i++;
+                }
             }
         }
     }
@@ -215,6 +268,7 @@ sub HELP_MESSAGE {
     -v for video updates
     -l for link updates
     -i for all item updates (e.g., year fixes)
+    -r for recommendation updates
     -f to update the front page
 ";
 }
@@ -230,23 +284,26 @@ sub run {
         cookie_jar => HTTP::Cookies->new(file => "cookies.txt"));
 
     my %opts = ();
-    getopts('tvlif', \%opts);
+    getopts('tvlirf', \%opts);
 
     if(length(%opts) > 1) {
         if(exists($opts{'t'})) {
-            process_nodes($ua, "topics", \&process_topic);
+            process_nodes($ua, "topics", \&process_topic, 1);
         }
         if(exists($opts{'v'})) {
-            process_nodes($ua, "items?item_type=$item_types{'video'}", \&process_video);
+            process_nodes($ua, "items?item_type=$item_types{'video'}", \&process_video, 1);
         }
         if(exists($opts{'l'})) {
-            process_nodes($ua, "items?item_type=$item_types{'link'}", \&process_link);
+            process_nodes($ua, "items?item_type=$item_types{'link'}", \&process_link, 1);
         }
         if(exists($opts{'i'})) {
-            process_nodes($ua, "items", \&process_item);
+            process_nodes($ua, "items", \&process_item, 1);
+        }
+        if(exists($opts{'r'})) {
+            process_nodes($ua, "items-random", \&process_recommendation, 0);
         }
         if(exists($opts{'f'})) {
-            process_nodes($ua, "front-page", \&process_front_page);
+            process_nodes($ua, "front-page", \&process_front_page, 1);
             promote_top_nodes($ua);
         }
     } else {
