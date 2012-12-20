@@ -174,7 +174,7 @@ sub promote_top_nodes {
     my $news_count = 0;
     my $i = 0;
     foreach my $line (split(/\n/, $analytics_output)) {
-        if($i >= 6 && $news_count >= 2) { last; }
+        if($i >= 4 && $news_count >= 2) { last; }
         else {
             my ($alias) = ($line =~ m!\(\d+/\d+\) /(.*$)!);
             my $nid = get_node_by_alias($ua, $alias);
