@@ -13,12 +13,17 @@ use vars qw($VERSION @ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
 $VERSION     = 1.00;
 @ISA         = qw(Exporter);
 @EXPORT      = ();
-@EXPORT_OK   = qw(upload_file update_node process_nodes get_node_by_alias);
+@EXPORT_OK   = qw($host upload_file update_node process_nodes get_node_by_alias);
 %EXPORT_TAGS = (DEFAULT => [qw(upload_file update_node process_nodes get_node_by_alias)]);
 
+my $host;
+my $token;
+my $session_name;
+my $sessid;
+my $config;
 
-my $json_decoder = JSON->new->utf8;
-$json_decoder->allow_singlequote();
+my $json = JSON->new->utf8;
+$json->allow_singlequote();
 
 sub upload_file {
     my $ua = shift;
@@ -33,7 +38,7 @@ sub upload_file {
     close(FILE);
     my $json_content = '{"filesize": "'.$filesize.'", "filename": "'.$filename.'", "file": "'.$encoded.'"}';
 
-    my $create_req = HTTP::Request->new(POST => "http://aitopics.org/rest/file");
+    my $create_req = HTTP::Request->new(POST => "$host/rest/file");
     $create_req->content_type('application/json');
     $create_req->content($json_content);
     my $resp = $ua->request($create_req);
@@ -41,7 +46,7 @@ sub upload_file {
         print STDERR $resp->message;
         return 0;
     } else {
-        my %data = %{$json_decoder->decode($ua->{content})};
+        my %data = %{$json->decode($ua->{content})};
         return $data{'fid'};
     }
 }
@@ -49,9 +54,12 @@ sub upload_file {
 sub update_node {
     my $ua = shift;
     my $nid = shift;
-    my $json_content = shift;
-    print "Updating $nid: $json_content ... ";
-    my $update_req = HTTP::Request->new(PUT => "http://aitopics.org/rest/node/".$nid);
+    my %data = @_;
+    print "Updating $nid ... ";
+    my $json_content = $json->encode(\%data);
+    my $update_req = HTTP::Request->new(PUT => "$host/rest/node/".$nid);
+    $update_req->header('X-CSRF-Token', $token);
+    $update_req->header('session', "$session_name=$sessid");
     $update_req->content_type('application/json');
     $update_req->content($json_content);
     my $resp = $ua->request($update_req);
@@ -71,7 +79,7 @@ sub get_node_by_alias_edit_link {
     my $ua = shift;
     my $alias = shift;
     print "Trying to grab alias by 'edit' link on node view... ";
-    $ua->get("http://aitopics.org/$alias");
+    $ua->get("$host/$alias");
     if($ua->{content} =~ m!<a href="/node/(\d+)/edit">Edit</a>!) {
         my $nid = $1;
         print "Answer: $nid\n";
@@ -86,8 +94,8 @@ sub get_node_by_alias {
     my $ua = shift;
     my $alias = shift;
     print "Grabbing nid of alias $alias ... ";
-    $ua->get("http://aitopics.org/rest/node-by-alias?alias=$alias");
-    my @json_data = @{$json_decoder->decode($ua->{content})};
+    $ua->get("$host/rest/node-by-alias?alias=$alias");
+    my @json_data = @{$json->decode($ua->{content})};
     if($#json_data >= 0) {
         my %node = %{$json_data[0]};
         if($node{'node_title'} ne '') {
@@ -107,15 +115,26 @@ sub process_nodes {
     my $process_func = shift;
     my $paginated = shift;
 
-    my $config = YAML::LoadFile("aitopics.conf");
+    $config = YAML::LoadFile("aitopics.conf");
+    $host = $config->{host};
 
     print STDERR "Logging in...\n";
     my $login_req = HTTP::Request->new(
-        POST => "http://aitopics.org/rest/user/login");
+        POST => "$host/rest/user/login");
     $login_req->content_type('application/json');
     $login_req->content('{"username" : "'.$config->{username}.'",'.
                         ' "password" : "'.$config->{password}.'"}');
-    my $resp = $ua->request($login_req);
+    my %resp = %{$json->decode($ua->request($login_req)->{'_content'})};
+    $session_name = $resp{'session_name'};
+    $sessid = $resp{'sessid'};
+
+    my $token_req = HTTP::Request->new(
+        POST => "$host/services/session/token");
+    $token_req->content_type('application/json');
+    $token_req->content('{"name" : "'.$config->{username}.'",'.
+                        ' "pass" : "'.$config->{password}.'"}');
+    my $token_resp = $ua->request($token_req);
+    $token = $token_resp->decoded_content;
 
     my @nodes;
     my $page = 0;
@@ -123,11 +142,11 @@ sub process_nodes {
     while (1) {
         if($paginated) {
             print STDERR "Getting page $page\n";
-            $ua->get("http://aitopics.org/rest/$service&page=$page");
+            $ua->get("$host/rest/$service&page=$page");
         } else {
-            $ua->get("http://aitopics.org/rest/$service");
+            $ua->get("$host/rest/$service");
         }
-        my @json_data = @{$json_decoder->decode($ua->{content})};
+        my @json_data = @{$json->decode($ua->{content})};
         if($#json_data >= 0) {
             push(@nodes, @json_data);
             if($paginated) {
@@ -143,7 +162,9 @@ sub process_nodes {
     foreach my $i (0..$#nodes) {
         if($i % 100 == 0) { print "\n".($i+1)."/".($#nodes+1)."\n"; }
 
-        my %node = %{$nodes[$i]};
+        my %nid = %{$nodes[$i]};
+        $ua->get("$host/rest/node/".$nid{'nid'});
+        my %node = %{$json->decode($ua->{content})};
 
         if($process_func->($ua, %node)) {
             print "{$node{'nid'}}\n";

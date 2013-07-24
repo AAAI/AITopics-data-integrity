@@ -8,7 +8,7 @@ use Data::Dumper;
 use Getopt::Std;
 use Date::Simple ('today');
 
-use AITopics qw(upload_file update_node process_nodes get_node_by_alias);
+use AITopics qw($host upload_file update_node process_nodes get_node_by_alias);
 
 my %item_types = (
     'link' => '3826',
@@ -26,11 +26,15 @@ sub correct_local_link {
     if(UNIVERSAL::isa($node{'field_original_link'}, "HASH")) {
         if($node{'field_original_link'}{'und'}[0]{'url'} =~ m!^/!) {
             $node{'field_original_link'}{'und'}[0]{'url'} =~ s!^/+!http://aitopics.org/!;
-            return update_node($ua, %node);
+            return update_node($ua, $node{'nid'},
+                               ('field_original_link' =>
+                                {'und' => [{'url' => $node{'field_original_link'}{'und'}[0]{'url'}}]}));
         } elsif($node{'field_original_link'}{'und'}[0]{'url'} =~ m!^sites/default/files!) {
             $node{'field_original_link'}{'und'}[0]{'url'} = "http://aitopics.org/" .
                 $node{'field_original_link'}{'und'}[0]{'url'};
-            return update_node($ua, %node);
+            return update_node($ua, $node{'nid'},
+                               ('field_original_link' =>
+                                {'und' => [{'url' => $node{'field_original_link'}{'und'}[0]{'url'}}]}));
         }
     }
     return 0;
@@ -65,7 +69,7 @@ sub process_link {
     my (%node) = @_;
     my $result = 0;
 
-    #$result |= correct_local_link($ua, %node);
+    $result |= correct_local_link($ua, %node);
 
     #$result |= check_title_in_primary_link($ua, %node);
     
@@ -93,8 +97,8 @@ sub process_recommendation {
     my (%node) = @_;
 
     # grab node alias
-    my $resp = $ua->get('http://aitopics.org/node/'.$node{'nid'});
-    my ($alias) = ($resp->header('Content-Location') =~ m!^http://aitopics.org(.*)$!);
+    my $resp = $ua->get($host.'/node/'.$node{'nid'});
+    my ($alias) = ($resp->header('Content-Location') =~ m!^$host(.*)$!);
     print "\nGetting next clicks for $alias\n";
     my $today = today();
     my $month_back = $today - 30;
@@ -109,14 +113,14 @@ sub process_recommendation {
             my $click_count = $2;
             if($next_alias eq $alias) { next; }
 
-            $ua->get('http://aitopics.org'.$next_alias);
+            $ua->get($host.$next_alias);
             my $title = $ua->title();
             $title =~ s/(["'])/\\$1/g;
             $title =~ s/ \| AITopics$//;
             if($i > 0) {
                 $json_content .= ", ";
             }
-            $json_content .= '{"url": "http://aitopics.org'.$next_alias.'", "title": "'.$title.'"}';
+            $json_content .= '{"url": "$host'.$next_alias.'", "title": "'.$title.'"}';
             $i++;
         }
         $json_content .= ']}}';
@@ -229,7 +233,7 @@ sub process_topic {
             my $url = $1;
             my $resp = $ua->get($url);
             if(!$resp->is_success) {
-                $resp = $ua->get("http://aitopics.org$url");
+                $resp = $ua->get("$host$url");
                 if(!$resp->is_success) {
                     push(@issues, "Broken links in summary");
                     last;
