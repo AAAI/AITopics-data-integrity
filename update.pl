@@ -186,13 +186,13 @@ sub promote_top_nodes {
                 if($alias =~ m!^news/\w+!) {
                     if($news_count < 2) {
                         print "Promoting $alias\n";
-                        update_node($ua, $nid, '{"promote": "1", "field_sort_weight": {"und": [{"value": "'.$news_count.'"}]}}');
+                        update_node($ua, $nid, ('promote' => 1, 'field_sort_weight' => {'und' => [{'value' => $news_count}]}));
                     }
                     $news_count++;
                 } else {
                     if($i < 4) {
                         print "Promoting $alias\n";
-                        update_node($ua, $nid, '{"promote": "1", "field_sort_weight": {"und": [{"value": "'.$i.'"}]}}');
+                        update_node($ua, $nid, ('promote' => 1, 'field_sort_weight' => {'und' => [{'value' => $i}]}));
                     }
                     $i++;
                 }
@@ -208,7 +208,7 @@ sub process_front_page {
     my $result = 0;
 
     # unpublish every front page node
-    $result = update_node($ua, $node{'nid'}, '{"promote": null}');
+    $result = update_node($ua, $node{'nid'}, ('promote' => undef));
 }
 
 sub process_topic {

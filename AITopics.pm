@@ -56,6 +56,7 @@ sub update_node {
     my $nid = shift;
     my %data = @_;
     print "Updating $nid ... ";
+    print Dumper(\%data);
     my $json_content = $json->encode(\%data);
     my $update_req = HTTP::Request->new(PUT => "$host/rest/node/".$nid);
     $update_req->header('X-CSRF-Token', $token);
