@@ -307,7 +307,7 @@ sub run {
             process_nodes($ua, "items-random", \&process_recommendation, 0);
         }
         if(exists($opts{'f'})) {
-            process_nodes($ua, "front-page", \&process_front_page, 1);
+            process_nodes($ua, "front-page", \&process_front_page, 0);
             promote_top_nodes($ua);
         }
     } else {
